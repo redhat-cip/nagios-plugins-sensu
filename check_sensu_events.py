@@ -61,29 +61,51 @@ def collect_args():
 # Format decoded JSON
 #
 def format_json_and_exit(events,info):
-  # Array empty: OK
+  # in case the returned array is empty: OK
   if not events:
-    print "OK: no ongoing events returned by Sensu API."
-    sys.exit(STATE_OK)
+    nagios_output = "OK: no ongoing events returned by Sensu API.\n"
+    exit_code = STATE_OK
   else:
     crit_count = 0
+    warn_count = 0
     nagios_output_ext = ""
+
     for event in events:
-      # only critical events
-      if event.get('status') == 2:
+      # only CRITICAL events
+      if event.get('status') == STATE_CRITICAL:
         crit_count = crit_count + 1
         nagios_output_ext += "%s%s - %s: %s<br />" % (nagios_output_ext,
-			                                             event.get('client'),
-                                    				     event.get('check'),
-						                                 event.get('output'))
-    nagios_output = "CRITICAL: There's %d critical events going on in Sensu platform right now.\n" % (crit_count)
+                                                                     event.get('client'),
+                                                                     event.get('check'),
+                                                                                 event.get('output'))
+
+      # only WARNING events
+      if event.get('status') == STATE_WARNING:
+        warn_count = warn_count + 1
+        nagios_output_ext += "%s%s - %s: %s<br />" % (nagios_output_ext,
+                                                         event.get('client'),
+                                                         event.get('check'),
+                                                         event.get('output'))
+
+    # count WARNING checks
+    if warn_count:
+      nagios_output = "WARNING: %d warning events in the Sensu platform.\n" % (crit_count)
+      exit_code = STATE_WARNING
+
+    # count CRITICAL checks
+    if crit_count:
+      nagios_output = "CRITICAL: %d critical events in the Sensu platform.\n" % (crit_count)
+      exit_code = STATE_CRITICAL
+
+    # add all parsed output (warning+critical)
     nagios_output += nagios_output_ext
-    # Adding additional infos if provided by user
-    if info is not None:
-      nagios_output += "<br />%s" % (info)
+
+    # adding additional infos if provided by user
+    if info:
+      nagios_output += "%s" % (info)
 
     print str(nagios_output)
-    sys.exit(STATE_CRITICAL)
+    sys.exit(exit_code)
 
 #
 # GET /events on sensu-api
