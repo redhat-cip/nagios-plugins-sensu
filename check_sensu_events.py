@@ -9,6 +9,7 @@
 #   Nicolas Auvray <nicolas.auvray@enovance.com>
 # Contributors:
 #   Alexandre Maumené <alexandre@enovance.com>
+#   Julien Syx <julien@syx.fr>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,8 +27,8 @@
 
 import sys
 import argparse
-import json
-import urllib2
+import requests
+from urllib2 import HTTPError
 
 # States
 STATE_OK = 0
@@ -37,8 +38,7 @@ STATE_UNKNOWN = 3
 
 
 def collect_args():
-    parser = argparse.ArgumentParser(
-        description='Get a list of events from a Sensu API')
+    parser = argparse.ArgumentParser(description='Get a list of events from a Sensu API')
     parser.add_argument('--hostname', metavar='hostname', type=str,
                         default='localhost',
                         help='Hostname or IP address of the Sensu API service')
@@ -54,123 +54,147 @@ def collect_args():
     parser.add_argument('--timeout', metavar='timeout', type=float,
                         default=10,
                         help='Timeout in seconds for the API call to return')
-    parser.add_argument(
-        '--info',
-        metavar='info',
-        type=str,
-        default=None,
-        help='Additional informations to output like sensu-dashboard address')
+    parser.add_argument('--info', metavar='info', type=str,
+                        default=None,
+                        help='Additional informations to output like sensu-dashboard address or whatever')
     return parser
+
 
 #
 # Format decoded JSON
 #
+def format_json_and_exit(events, stashes, info=None):
+    nagios_output = ""
+    nagios_output_ext = ""
+    exit_code = STATE_UNKNOWN
+    crit_count = 0
+    warn_count = 0
+    unknown_count = 0
+    stash_count = 0
 
-
-def format_json_and_exit(events, info):
     # in case the returned array is empty: OK
-    if len(json.dumps(events)) == 2:
-        nagios_output = "OK: no ongoing events returned by Sensu API."
+    if not events:
+        nagios_output = "OK: no ongoing events returned by Sensu API.\n"
         exit_code = STATE_OK
-    else:
-        crit_count = 0
-        warn_count = 0
+
+    for event in events:
+        #pprint(event)
+        #pprint(stashes)
+        in_stash = False
+        check = event.get('check')
+        client = event.get('client')
+        status = check.get('status')
+
+        for stash in stashes:
+            if '/'.join(['silence', client['name'], check['name']]) in stash['path']:
+                in_stash = True
+                stash_count += 1
+        # only CRITICAL events
+        if status == STATE_CRITICAL and not in_stash:
+            crit_count += 1
+            nagios_output_ext += "%s%s - %s\n" % (nagios_output_ext,
+                                                      client['name'],
+                                                      check['name'])
+
+        # only WARNING events
+        if status == STATE_WARNING and not in_stash:
+            warn_count += 1
+            nagios_output_ext += "%s%s - %s: %s\n" % (nagios_output_ext,
+                                                      event.get('client'),
+                                                      event.get('check'),
+                                                      event.get('output'))
+
+        # only UNKNOWN events
+        if status == STATE_UNKNOWN and not in_stash:
+            unknown_count += 1
+            nagios_output_ext += "%s%s - %s: %s\n" % (nagios_output_ext,
+                                                      event.get('client'),
+                                                      event.get('check'),
+                                                      event.get('output'))
+
+    # count WARNING checks
+    if warn_count:
+        nagios_output = "WARNING: %d warning events in the Sensu platform.\n" % warn_count
+        exit_code = STATE_WARNING
+
+    # count CRITICAL checks
+    if crit_count:
+        nagios_output = "CRITICAL: %d critical events in the Sensu platform.\n" % crit_count
+        exit_code = STATE_CRITICAL
+
+    # count UNKNOWN checks
+    if unknown_count:
+        nagios_output = "UNKNOWN: %d unknown events in the Sensu platform.\n" % unknown_count
         exit_code = STATE_UNKNOWN
-        nagios_output = ""
-        nagios_output_ext = ""
 
-        for event in events:
-            # only CRITICAL events
-            if event['check'].get('status') == STATE_CRITICAL:
-                crit_count = crit_count + 1
-                nagios_output_ext += "%s\t- %s" % (event['client'].get('name'),
-                                                   event['check'].get('output'))
+    # count STASH checks
+    if stash_count:
+        if stash_count == len(events):
+            nagios_output = "OK: no ongoing events returned by Sensu API and %d checks in stash\n" % stash_count
+            exit_code = STATE_OK
 
-            # only WARNING events
-            if event['check'].get('status') == STATE_WARNING:
-                warn_count = warn_count + 1
-                nagios_output_ext += "%s\t- %s" % (event['client'].get('name'),
-                                                   event['check'].get('output'))
-
-        # count WARNING checks
-        if warn_count:
-            if warn_count == 1:
-                nagios_output = "WARNING: %d warning event in the Sensu platform.\n" % (
-                    warn_count)
-            else:
-                nagios_output = "WARNING: %d warning events in the Sensu platform.\n" % (
-                    warn_count)
-            exit_code = STATE_WARNING
-
-        # count CRITICAL checks
-        if crit_count:
-            if crit_count == 1:
-                nagios_output = "CRITICAL: %d critical event in the Sensu platform.\n" % (
-                    crit_count)
-            else:
-                nagios_output = "CRITICAL: %d critical events in the Sensu platform.\n" % (
-                    crit_count)
-            exit_code = STATE_CRITICAL
-
-        # add all parsed output (warning+critical)
-        nagios_output += nagios_output_ext
-
+    # add all parsed output (warning+critical+unknown)
+    nagios_output += nagios_output_ext
     # adding additional infos if provided by user
     if info:
-        nagios_output += "%s" % (info)
+        nagios_output += "%s" % info
 
-    print(nagios_output)
+    print str(nagios_output)
     sys.exit(exit_code)
+
 
 #
 # GET /events on sensu-api
 #
-
-
 def get_events(args):
-    url = "http://%s:%d/events" % (args.hostname, args.port)
-
+    event_url = "http://%s:%d/events" % (args.hostname, args.port)
+    stashes_url = "http://%s:%d/stashes" % (args.hostname, args.port)
+    to = 10
     if args.timeout is not None:
         to = args.timeout
 
     # Build the request and load it
     try:
         if not args.username and not args.password:
-            req = urllib2.urlopen(url, timeout=to)
+            req_event = requests.get(event_url, timeout=to)
+            req_stashes = requests.get(stashes_url, timeout=to)
         elif args.username and args.password:
-            print("Username/Password not supported ANYMOAR MOUAHAHA.")
-            sys.exit(STATE_CRITICAL)
+            req_event = requests.get(event_url, timeout=to, auth=(args.username, args.password))
+            req_stashes = requests.get(stashes_url, timeout=to, auth=(args.username, args.password))
         else:
-            print("Error: please provide both username and password.")
-            req = None
-    except urllib2.HTTPError as e:
-        print('CRITICAL: HTTPError = ' + str(e.code))
+            print "Error: please provide both username and password"
+            req_event = None
+            req_stashes = None
+    except requests.ConnectionError:
+        print "CRITICAL: Unable to connect to %s" % event_url
         sys.exit(STATE_CRITICAL)
-    except urllib2.URLError as e:
-        print('CRITICAL: URLError = ' + str(e.reason))
+    except requests.Timeout:
+        print "CRITICAL: Timeout reached when attempting to connect to Sensu API."
         sys.exit(STATE_CRITICAL)
-    except httplib.HTTPException as e:
-        print('CRITICAL: HTTPException')
-        sys.exit(STATE_CRITICAL)
+    except HTTPError as e:
+        print "UNKNOWN: Sensu API sent an HTTP response that I cannot understand. %s" % e
+        sys.exit(STATE_UNKNOWN)
 
     # Exit if empty requests object
-    if not req:
+    if not req_event:
         sys.exit(STATE_UNKNOWN)
 
     # Handle HTTP codes
-    if req.getcode() == 200:
+    if req_event.status_code == 200:
         try:
-            res = json.loads(req.read())
+            # python-requests has its own json decoder
+            res_event = req_event.json()
+            res_stashes = req_stashes.json()
         except Exception:
-            print("UNKNOWN: Error decoding JSON Object.")
+            print "UNKNOWN: Error decoding JSON Object"
             sys.exit(STATE_UNKNOWN)
-        format_json_and_exit(events=res, info=args.info)
+        format_json_and_exit(events=res_event, stashes=res_stashes, info=args.info)
     # Error
-    elif req.getcode() == 500:
-        print("CRITICAL: Sensu API returned an HTTP 500. Is RabbitMQ/sensu-server running?")
-        sys.ext(STATE_CRITICAL)
+    elif req_event.status_code == 500:
+        print "CRITICAL: Sensu API returned an HTTP 500. Is RabbitMQ/sensu-server running?"
+        sys.exit(STATE_CRITICAL)
     else:
-        print("CRITICAL: Bad response (%d) from Sensu API." % (req.getcode()))
+        print "CRITICAL: Bad response (%d) from Sensu API." % req_event.status_code
         sys.exit(STATE_CRITICAL)
 
 #
@@ -181,5 +205,5 @@ if __name__ == '__main__':
     try:
         sys.exit(get_events(args))
     except Exception as e:
-        print("CRITICAL: %s" % (e))
+        print "CRITICAL: %s" % e
         sys.exit(STATE_CRITICAL)
