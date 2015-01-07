@@ -8,4 +8,4 @@ Dependencies
 ------------
 check_sensu_health.sh : curl
 
-check_sensu_events.py : python-argparse
+check_sensu_events.py : python-argparse, python-requests
