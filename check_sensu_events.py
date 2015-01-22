@@ -7,7 +7,9 @@
 #
 # Authors:
 #   Nicolas Auvray <nicolas.auvray@enovance.com>
-#   Julien Syx <julien.syx@enovance.com>
+# Contributors:
+#   Alexandre Maumené <alexandre@enovance.com>
+#   Julien Syx <julien@syx.fr>
 #   Hugo Rosnet <hugo.rosnet@enovance.com>
 #
 # This program is free software: you can redistribute it and/or modify
