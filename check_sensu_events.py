@@ -154,7 +154,7 @@ def format_json_and_exit(events, stashes, info=None, filter=".*", logger=__name_
 
     # in case the returned array is empty: OK
     if not events:
-        nagios_output = "OK: no ongoing events returned by Sensu API.\n"
+        nagios_output = "OK: no ongoing events returned by Sensu API."
         exit_code = STATE_OK
 
     client_filter = re.compile(filter)
