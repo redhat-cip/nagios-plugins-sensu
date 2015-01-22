@@ -183,21 +183,21 @@ def format_json_and_exit(events, stashes, info=None, filter=".*", logger=__name_
 
         if not in_stash and not filtered:
             # only CRITICAL events
-            if status == STATE_CRITICAL and not in_stash:
+            if status == STATE_CRITICAL:
                 crit_count += 1
                 nagios_output_ext += "%s - %s: %s\n" % (client['name'],
                                                         check['name'],
                                                         check['output'])
 
             # only WARNING events
-            if status == STATE_WARNING and not in_stash:
+            if status == STATE_WARNING:
                 warn_count += 1
                 nagios_output_ext += "%s - %s: %s\n" % (client['name'],
                                                         check['name'],
                                                         check['output'])
 
             # only UNKNOWN events
-            if status == STATE_UNKNOWN and not in_stash:
+            if status == STATE_UNKNOWN:
                 unknown_count += 1
                 nagios_output_ext += "%s - %s: %s\n" % (client['name'],
                                                         check['name'],
