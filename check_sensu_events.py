@@ -96,9 +96,10 @@ def collect_args():
     parser.add_argument('--hostname', metavar='hostname', type=str,
                         default='localhost',
                         help='Hostname or IP address of the Sensu API service')
-    parser.add_argument('--port', metavar='port', type=int,
-                        default=4567,
+    parser.add_argument('--port', metavar='port', type=int, default=4567,
                         help='Port of the Sensu API service')
+    parser.add_argument('--ssl',  action='store_true', default=False,
+                        help='Allow SSL connection to Sensu API service')
     parser.add_argument('--username', metavar='username', type=str,
                         default="",
                         help='Username to use for the Sensu API service')
@@ -108,14 +109,11 @@ def collect_args():
     parser.add_argument('--timeout', metavar='timeout', type=float,
                         default=10,
                         help='Timeout in seconds for the API call to return')
-    parser.add_argument('--info', metavar='info', type=str,
-                        default=None,
+    parser.add_argument('--info', metavar='info', type=str, default=None,
                         help='Additional informations to output like sensu-dashboard address or whatever')
-    parser.add_argument('--debug', action='store_true',
-                        default=False,
+    parser.add_argument('--debug', action='store_true', default=False,
                         help='Decide level of verbosity (mostly for DEBUG)')
-    parser.add_argument('--filter', metavar='filter', type=str,
-                        default='.*',
+    parser.add_argument('--filter', metavar='filter', type=str, default=".*",
                         help='Decide client name to keep, other will be ignored')
     return parser
 
@@ -182,24 +180,25 @@ def format_json_and_exit(events, stashes, info=None, filter=".*", logger=__name_
                     stash_count += 1
 
         if not in_stash and not filtered:
+            check['output'] = check['output'].encode('ascii', 'ignore')
             # only CRITICAL events
             if status == STATE_CRITICAL:
                 crit_count += 1
-                nagios_output_ext += "%s - %s: %s\n" % (client['name'],
+                nagios_output_ext += "\n%s - %s: %s" % (client['name'],
                                                         check['name'],
                                                         check['output'])
 
             # only WARNING events
             if status == STATE_WARNING:
                 warn_count += 1
-                nagios_output_ext += "%s - %s: %s\n" % (client['name'],
+                nagios_output_ext += "\n%s - %s: %s" % (client['name'],
                                                         check['name'],
                                                         check['output'])
 
             # only UNKNOWN events
             if status == STATE_UNKNOWN:
                 unknown_count += 1
-                nagios_output_ext += "%s - %s: %s\n" % (client['name'],
+                nagios_output_ext += "\n%s - %s: %s" % (client['name'],
                                                         check['name'],
                                                         check['output'])
 
@@ -231,7 +230,7 @@ def format_json_and_exit(events, stashes, info=None, filter=".*", logger=__name_
             exit_code = STATE_OK
 
     # add all parsed output (warning+critical+unknown)
-    nagios_output += " (%d in stash & %d filtered.)\n" % (stash_count, filter_count)
+    nagios_output += " (%d stashed & %d filtered)" % (stash_count, filter_count)
     nagios_output += nagios_output_ext
     # adding additional infos if provided by user
     if info:
@@ -255,15 +254,15 @@ def get_events(args, logger=__name__):
     :type logger: str
     """
     log = logging.getLogger(logger)
-    event_url = "http://%s:%d/events" % (args.hostname, args.port)
-    stashes_url = "http://%s:%d/stashes" % (args.hostname, args.port)
+    proto = "https" if args.ssl is True else "http"
+    event_url = "%s://%s:%d/events" % (proto, args.hostname, args.port)
+    stashes_url = "%s://%s:%d/stashes" % (proto, args.hostname, args.port)
     to = 10
     if args.timeout is not None:
         to = args.timeout
     log.debug("Event_url: %s" % event_url)
     log.debug("Stashes_url: %s" % stashes_url)
     log.debug("Timeout: %s" % to)
-
     # Build the request and load it
     try:
         if not args.username and not args.password:
