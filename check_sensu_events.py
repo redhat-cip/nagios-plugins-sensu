@@ -225,7 +225,8 @@ def format_json_and_exit(events, stashes, info=None, filter=".*", logger=__name_
 
     # count STASH checks
     if stash_count or filter_count:
-        if stash_count == len(events) or filter_count == len(events):
+        if stash_count == len(events) or filter_count == len(events) or \
+        stash_count + filter_count == len(events):
             nagios_output = "OK: no ongoing events returned by Sensu API."
             exit_code = STATE_OK
 
